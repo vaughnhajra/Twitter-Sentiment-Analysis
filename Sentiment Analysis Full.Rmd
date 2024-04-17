@@ -1,0 +1,441 @@
+---
+title: "Sentiment Analysis Vaughn Hajra"
+author: "Vaughn Hajra"
+date: "2023-10-22"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#install.packages("googlesheets4")
+#install.packages("tidyverse")
+#install.packages("tidytext")
+#install.packages("textdata")
+#install.packages("quantmod")
+
+
+library(googlesheets4)
+library(tidyverse)
+library(tidytext)
+library(textdata)
+library(quantmod)
+```
+
+## Sentiment Analysis Vaughn Hajra
+
+```{r}
+link = "https://docs.google.com/spreadsheets/d/1GiRtU5E7HT7SzMXtdXknujObkmyua0H3qa5TvIrpSpo/edit#gid=231239580"
+all_tweets <- read_sheet(link)
+
+```
+
+First we want to remove all the re-tweets from the sample
+
+```{r}
+tweets <- subset(all_tweets, is_retweet == FALSE)
+```
+
+now lets make sure we only have retweets
+
+```{r}
+summary(tweets$is_retweet)
+```
+
+Now we will get the 3 sentiment libraries up and running. We are primarily interested in the "afinn" and "bing" libraries, but "nrc" could be interesting in the future.
+
+```{r}
+afinn <- get_sentiments("afinn")
+bing <- get_sentiments("bing")
+nrc <- get_sentiments("nrc")
+```
+
+Now let's make a function to get sentiment score from given text
+
+```{r}
+# Create a function to calculate sentiment score for a given text using affin library
+calculate_sentiment_score <- function(text) {
+  words <- unlist(strsplit(tolower(text), "\\s+"))
+  sentiment_scores <- sapply(words, function(word1) {
+    if (word1 %in% afinn$word) {
+      return(afinn$value[afinn$word == word1])
+    }
+    return(0)  # Default score for words not in 'afinn' dataset
+  })
+  return(sum(sentiment_scores))
+}
+```
+
+Now run for all columns of tweets
+
+```{r}
+# Apply the function to each row in 'all_tweets' and add the scores to a new column
+all_tweets$afinn_Score <- sapply(all_tweets$text, calculate_sentiment_score)
+
+```
+
+```{r}
+#Make values 1 and negative 1 based on positive or negative in bing database
+bing <- bing %>%
+  mutate(value = case_when(
+    sentiment == "positive" ~ 1,
+    TRUE ~ -1
+  ))
+
+# Create a function to calculate sentiment score for a given text using the 'bing' database
+calculate_sentiment_score_bing <- function(text) {
+  words <- unlist(strsplit(tolower(text), "\\s+"))
+  sentiment_scores <- unlist(lapply(words, function(word1) {
+    if (word1 %in% bing$word) {
+      return(as.numeric(bing$value[bing$word == word1]))
+    }
+    return(0)  # Default score for words not in 'bing' dataset
+  }))
+  return(sum(sentiment_scores))
+}
+
+
+```
+
+```{r}
+# Apply the function to each row in 'all_tweets' and add the scores to a new column
+all_tweets$bing_Score <- sapply(all_tweets$text, calculate_sentiment_score_bing)
+```
+
+let's take a look at the all_tweets dataset to see if we got the intended result.
+
+```{r}
+head(all_tweets[order(-all_tweets$bing_Score),])
+head(all_tweets[order(all_tweets$bing_Score),])
+```
+
+Great! We have both the bing and affinn scores, and they are matching what we are hoping to acheive. Now let's get rid of the retweets (could've done sooner but want to keep replicable if future study wants to also analyze the retweets)
+
+```{r}
+all_tweets <- subset(all_tweets, is_retweet == FALSE)
+```
+
+Now let's get the S&P 500 companies:
+
+```{r}
+linkSP <- "https://docs.google.com/spreadsheets/d/1U6xcSWk_WbYc7v9_8BzeyS0cCREHftxLg4EwcO_9dDg/edit#gid=0"
+SandP <- read_sheet(linkSP)
+
+```
+
+What does the S&P dataframe look like?
+
+```{r}
+head(SandP)
+
+```
+
+```{r}
+# Convert "Name" column to lowercase
+SandP$Name_lower <- tolower(SandP$Name)
+
+# Remove non-important company words
+# Add more substitutions - Make sure order of removal is correct!
+SandP$Name_lower <- gsub("limited", "", SandP$Name_lower)
+#SandP$Name_lower <- gsub("&", " and ", SandP$Name_lower)
+SandP$Name_lower <- gsub("systems", "", SandP$Name_lower)
+SandP$Name_lower <- gsub(" a", "", SandP$Name_lower)
+SandP$Name_lower <- gsub(" inc.", "", SandP$Name_lower)
+SandP$Name_lower <- gsub(" int'l", "", SandP$Name_lower)
+SandP$Name_lower <- gsub(" com", "", SandP$Name_lower)
+SandP$Name_lower <- gsub(" inc", "", SandP$Name_lower)
+SandP$Name_lower <- gsub(" company", "", SandP$Name_lower)
+SandP$Name_lower <- gsub(" corporation", "", SandP$Name_lower)
+SandP$Name_lower <- gsub(" corp", "", SandP$Name_lower)
+SandP$Name_lower <- gsub(".com", "", SandP$Name_lower)
+SandP$Name_lower <- gsub(" co.", "", SandP$Name_lower)
+SandP$Name_lower <- gsub(" co", "", SandP$Name_lower)
+SandP$Name_lower <- gsub(",", "", SandP$Name_lower)
+
+# Remove leading and trailing spaces and periods
+SandP$Name_lower <- gsub("^\\s+|\\s+$", "", SandP$Name_lower)  # Remove leading and trailing spaces
+SandP$Name_lower <- gsub("^\\.+|\\.+$", "", SandP$Name_lower)  # Remove leading and trailing periods
+
+# Still some names that need manual fixing
+
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "VIAB", "viacom", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "WPO", "washington post", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "TJX", "tjx", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "DIS", "disney", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "TIF", "tiffany & co", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "HSY", "hershey", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "TEL", "te connectivity", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "SUV", "southwest", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "SO", "southern co", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "SEE", "sealed air", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "QCOM", "qualcomm", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "PEP", "pepsi", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "OMC", "omnicon group", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "ORLY", "o'reily", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "NWSA", "news corporation", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "MRK", "merk", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "MKC", "mccormick", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "LSI", "lsi corporation", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "LTD", "limited brands", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "LLY", "lilly & co", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "LH", "laboratory corp of america", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "JPM", "jp morgan", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "FTR", "frontier communications", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "FIS", "fidelity", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "XOM", "exxon", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "DE", "deere", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "CCE", "coca-cola", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "CA", "ca inc", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "BRCM", "broadcom", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "BA", "boeing", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "BLL", "ball corp", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "AES", "aes corp", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "ACE", "chubb", Name_lower)) #Finance sector? Only I can find is a subsidiary of chubb
+
+#Now renaming common errors that are occuring in the recognition
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "PPL", "ppl corp", Name_lower)) 
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "HRS", "harris corporation", Name_lower)) 
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "MMM", "3m corp", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "COH", "coach inc", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "INTC", "intel ", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "TGT", "target ", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "NE", "noble corp", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "SAI", " saic ", Name_lower))
+SandP <- SandP %>% mutate(Name_lower = ifelse(Symbol == "DELL", " dell ", Name_lower))
+
+
+
+
+
+# Print the modified SandP
+head(SandP)
+```
+
+We also want to remove the special characters from the text
+
+```{r}
+# Convert 'text' to lowercase
+all_tweets$text2 <- tolower(all_tweets$text)
+
+# Remove special characters other than periods (decided not to do this)
+#all_tweets$text2 <- gsub("[^a-z0-9. ]", "", all_tweets$text2)
+
+```
+
+Now that we have the names ready to go, let's see which tweets mention companies!
+
+```{r}
+# Assuming you have the 'all_tweets' and 'SandP' data frames
+
+# Create the 'contains_name', 'company', and 'ticker' columns with initial values
+all_tweets$contains_name <- FALSE
+all_tweets$company <- NA
+all_tweets$ticker <- NA
+all_tweets$sector <- NA
+
+# Iterate through each company name and check if it's mentioned in 'text2'
+for (i in 1:nrow(SandP)) {
+  company_name <- SandP$Name_lower[i]
+  ticker <- SandP$Symbol[i]
+  sector <- SandP$Sector[i]
+  
+  # Create a logical vector indicating if 'text' contains the company name
+  contains_name_vector <- str_detect(all_tweets$text2, fixed(company_name))
+  
+  # Update 'contains_name' column
+  all_tweets$contains_name[contains_name_vector] <- TRUE
+  
+  # Update 'company' column with the company name
+  all_tweets$company[contains_name_vector] <- company_name
+  
+  # Update 'ticker' column with the company's stock ticker
+  all_tweets$ticker[contains_name_vector] <- ticker
+  
+  # Update 'ticker' column with the company's stock ticker
+  all_tweets$sector[contains_name_vector] <- sector
+
+}
+
+
+```
+
+Now let's do a manual check for all the tweets (commented out for R markdown knit but you get the idea, for now just set it to contains name)
+
+```{r}
+all_tweets$manual_check = all_tweets$contains_name
+# Define a function to interactively set 'manual_check' with an option to stop
+interactiveManualCheck <- function(data) {
+  for (i in seq_len(nrow(data))) {
+    if (!is.na(data$company[i])) {
+      cat("Tweet:", data$text2[i], "\n")
+      cat("Company:", data$company[i], "\n")
+      cat("Is this tweet correctly mentioning the company? (Type 'T' for TRUE, 'stop' to stop, anything else for FALSE): ")
+      
+      user_input <- tolower(readline(prompt = ""))
+      if (user_input == "stop") {
+        break
+     } else if (user_input == "t") {
+        data$manual_check[i] <- TRUE
+      } else {
+        data$manual_check[i] <- FALSE
+      }
+    }
+  }
+  return(data)
+}
+
+# Call the function to interactively set 'manual_check'
+all_tweets2 <- interactiveManualCheck(all_tweets)
+
+# Print the updated dataset
+#print(all_tweets)
+# Assuming all_tweets2 is a list column that needs to be flattened
+library(tidyr)
+
+
+# Now, you can try writing the data frame to a CSV file
+#saveManual <- all_tweets2[, !colnames(all_tweets2) %in% "afinn_Score2"]
+all_tweets20 <- all_tweets2[, !colnames(all_tweets2) %in% "id"]
+all_tweets20 <- all_tweets20[, !colnames(all_tweets20) %in% "afinn_Score"]
+all_tweets20 <- all_tweets20[, !colnames(all_tweets20) %in% "bing_Score"]
+
+all_tweets2$afinn_Score2 = as.integer(all_tweets2$afinn_Score)
+
+write.csv(all_tweets20, "/Users/vaughn/Desktop/manual_check.csv", row.names = TRUE)
+
+
+```
+
+Now we have a specific data selection, let's only take what we're interested in
+
+```{r}
+
+all_comany_mentions <- subset(all_tweets2, manual_check)
+selected_columns <- all_comany_mentions[c("text", "retweets","date","afinn_Score","bing_Score","company","ticker","sector")]
+head(selected_columns)
+```
+
+Now let's subset into positive and negative tweets:
+
+```{r}
+#How many tweets contradict
+sum(selected_columns$afinn_Score > 0 & selected_columns$bing_Score < 0) #16 contradictary tweets
+
+#How many are very neutral??
+sum(selected_columns$afinn_Score == 0 & selected_columns$bing_Score == 0) #87 neutral tweets (control??)
+
+#positive tweets
+sum(selected_columns$afinn_Score > 0 & selected_columns$bing_Score > 0) #158 positive AGREED UPON tweets
+sum(selected_columns$afinn_Score > 0 & selected_columns$bing_Score == 0) #35 afinn positive and bing zero
+sum(selected_columns$afinn_Score == 0 & selected_columns$bing_Score > 0) #26 bing positive and afinn zero
+
+#Negative tweets
+sum(selected_columns$afinn_Score < 0 & selected_columns$bing_Score < 0) #124 negative AGREED UPON tweets
+sum(selected_columns$afinn_Score < 0 & selected_columns$bing_Score == 0) #34 afinn negative and bing zero
+sum(selected_columns$afinn_Score == 0 & selected_columns$bing_Score < 0) #13 bing negative and afinn zero
+
+
+16 + 87 + 158 + 35 + 26 + 124 + 34 + 13
+```
+
+Now let's save our negative and positive tweets
+
+```{r}
+negative_tweets <- subset(selected_columns, afinn_Score < 0 | bing_Score < 0)
+# Drop contradictory tweets (where one score is negative and the other is positive)
+negative_tweets <- subset(negative_tweets, !(afinn_Score < 0 & bing_Score > 0) & !(afinn_Score > 0 & bing_Score < 0))
+
+positive_tweets <- subset(selected_columns, afinn_Score > 0 | bing_Score > 0)
+# Drop contradictory tweets (where one score is negative and the other is positive)
+positive_tweets <- subset(positive_tweets, !(afinn_Score < 0 & bing_Score > 0) & !(afinn_Score > 0 & bing_Score < 0))
+
+print(colnames(positive_tweets))
+```
+
+Now the events function!
+
+```{r}
+library(dplyr)
+
+create_event_dataset <- function(original_data) {
+  new_data <- original_data %>%
+    arrange(date)%>% 
+    mutate(event_id = row_number()) %>%
+    mutate(event_date = date) %>%
+    mutate(day = 0)%>%
+    dplyr::select(date, ticker, event_id, date, day, event_date)
+  
+  new_data$date = as.Date(new_data$date)
+    new_data$event_date = as.Date(new_data$event_date)
+
+  new_data2 <- new_data %>%
+    group_by(event_id) %>%
+    complete(date = seq.Date(min(date), max(date) + 10, by = "days")) %>%
+    fill(ticker, .direction = "down") %>%
+    fill(day, .direction = "down") %>%
+    fill(event_date, .direction = "down") %>%
+    mutate(day = row_number() - 1) %>%
+    ungroup()
+  
+  new_data3 <- new_data2 %>%
+    group_by(event_id) %>%
+    complete(date = seq.Date(min(date)-210, min(date), by = "days")) %>%
+    fill(ticker, .direction = "up") %>%
+    fill(day, .direction = "up") %>%
+    fill(event_date, .direction = "up") %>%
+    mutate(day = row_number() - 211) %>%
+    ungroup()
+
+  return(new_data3)
+}
+
+
+# Example usage:
+# Assuming you have a dataframe named 'original_data' with columns 'ticker' and 'date'
+#result_df <- generate_event_data(original_data)
+
+
+```
+
+Now let's test it
+
+```{r}
+events_negative <- create_event_dataset(negative_tweets)
+events_positive <- create_event_dataset(positive_tweets)
+
+write.csv(events_negative, "/Users/vaughn/Desktop/events_negative.csv", row.names = TRUE)
+write.csv(events_positive, "/Users/vaughn/Desktop/events_positive.csv", row.names = TRUE)
+
+```
+
+Next, we need to retrieve the stock information. We will do this with google finance in google sheets!
+
+Loading back in the negative tweet information:
+
+```{r}
+link <- "https://docs.google.com/spreadsheets/d/1k5bLWFxigsNoOdFJ5U9-c_wTkR3hftZ-u7eUJijyEXg/edit"
+negative_stock <- read_sheet(link)
+negative_stock <- negative_stock %>%
+  dplyr::select(-`...1`)
+```
+
+now let's add the market information to this (Using NASDAQ 10 year data):\
+
+```{r}
+Mkt2 <- Mkt %>%
+  dplyr::select(date = Date, Close = Close.Last) %>%
+  mutate(event_id = 0) %>%
+  mutate(day = 0) %>%
+  mutate(ticker = "Mkt") %>%
+  mutate(event_date = date)
+
+Mkt2$date = as.Date(Mkt2$date, format = "%m/%d/%Y")
+Mkt2$event_date = as.Date(Mkt2$event_date, format = "%m/%d/%Y")
+
+negative_stock$date = as.Date(negative_stock$date, format = "%y-%m-%d")
+negative_stock$event_date = as.Date(negative_stock$event_date, format = "%y-%m-%d")
+
+
+combined <- rbind(negative_stock, Mkt2)
+write.csv(combined, "/Users/vaughn/Desktop/Stata_Ready_Negative.csv", row.names = TRUE)
+
+```
